@@ -30,6 +30,9 @@ TARGET_ANDROID ?= 0
 # Build for Emscripten/WebGL
 TARGET_WEB ?= 0
 
+# TOUCH CONTROLS
+TOUCH_CONTROLS ?= 1
+
 # Makeflag to enable OSX fixes
 OSX_BUILD ?= 0
 
@@ -100,16 +103,13 @@ endif
 ifeq ($(TARGET_WEB),0)
   ifeq ($(HOST_OS),Windows)
     WINDOWS_BUILD := 1
+    else
+    ifneq ($(shell which termux-setup-storage),)
+      TARGET_ANDROID := 1   
+      ifeq ($(shell dpkg -s apksigner | grep Version | sed "s/Version: //"),0.7-2)
+        OLD_APKSIGNER := 1
+      endif       
   endif
-endif
-
-OLD_APKSIGNER ?= 0
-
-# Attempt to detect termux android build
-ifneq ($(shell which termux-setup-storage),)
-  TARGET_ANDROID := 1
-  ifeq ($(shell dpkg -s apksigner | grep Version | sed "s/Version: //"),0.7-2)
-    OLD_APKSIGNER := 1
   endif
 endif
 
@@ -227,13 +227,31 @@ VERSION_CFLAGS := $(VERSION_CFLAGS) -DNON_MATCHING -DAVOID_UB
 ifeq ($(TARGET_RPI),1) # Define RPi to change SDL2 title & GLES2 hints
       VERSION_CFLAGS += -DUSE_GLES
 else ifeq ($(TARGET_ANDROID),1)
-  VERSION_CFLAGS += -DUSE_GLES=1 _LANGUAGE_C=1      
+  VERSION_CFLAGS += -DUSE_GLES=1     
 endif
 
- ifeq ($(TARGET_ANDROID),1)
-    BACKEND_LDFLAGS += -lhidapi -lSDL2
-  else ifeq ($(OSX_BUILD),1)
-     VERSION_CFLAGS += -DOSX_BUILD
+ifeq ($(TARGET_ANDROID),1)
+  DUMMY != uname -m
+  ifneq ($(shell uname -m | grep "i.86"),)
+    ARCH := x86
+    ARCH_APK := x86
+  else
+  ifeq ($(shell uname -m),x86_64)
+    ARCH := x86_64
+    ARCH_APK := x86_64
+  else
+  ifeq ($(shell getconf LONG_BIT),64)
+    ARCH := arm64
+    ARCH_APK := arm64-v8a
+  else
+    ARCH := arm
+    ARCH_APK := armeabi-v7a
+  endif
+  endif
+  endif
+  LIBPATH := ../ndk-libs/arch-$(ARCH)/usr/lib
+  PLATFORM_CFLAGS  := -fPIC
+  PLATFORM_LDFLAGS := -Wl,-rpath,$(LIBPATH) -L./android/lib/$(ARCH_APK)/ -L$(LIBPATH) -shared
 endif
 
 VERSION_ASFLAGS := --defsym AVOID_UB=1
@@ -291,6 +309,10 @@ endif
 # BUILD_DIR is location where all build artifacts are placed
 BUILD_DIR_BASE := build
 
+ ifeq ($(TARGET_ANDROID),1)
+    GFX_CFLAGS  += -DUSE_GLES -DTOUCH_CONTROLS
+    GFX_LDFLAGS += -lhidapi -lSDL2 -lGLESv2
+  endif
 ifeq ($(TARGET_WEB),1)
   BUILD_DIR := $(BUILD_DIR_BASE)/$(VERSION)_web
 else
@@ -307,7 +329,7 @@ EXE := $(BUILD_DIR)/$(TARGET).html
 else ifeq ($(TARGET_ANDROID),1)
   EXE := $(BUILD_DIR)/libmain.so
   APK := $(BUILD_DIR)/$(TARGET).unsigned.apk
-  APK_SIGNED := $(BUILD_DIR)/$(TARGET).apk    
+  APK_SIGNED := $(BUILD_DIR)/$(TARGET).apk
 
 		else # Linux builds/binary namer
 		ifeq ($(TARGET_RPI),1)
@@ -504,6 +526,9 @@ SEG_FILES := $(SEGMENT_ELF_FILES) $(ACTOR_ELF_FILES) $(LEVEL_ELF_FILES)
 
 ##################### Compiler Options #######################
 INCLUDE_CFLAGS := -I include -I $(BUILD_DIR) -I $(BUILD_DIR)/include -I src -I .
+ifeq ($(TARGET_ANDROID),1)
+INCLUDE_CFLAGS += -I SDL/include
+endif
 ENDIAN_BITWIDTH := $(BUILD_DIR)/endian-and-bitwidth
 include dynos.mk
 
@@ -647,6 +672,16 @@ endif
 ifeq ($(WINDOWS_BUILD),1)
   CC_CHECK := $(CC) -fsyntax-only -fsigned-char $(BACKEND_CFLAGS) $(INCLUDE_CFLAGS) -Wall -Wextra -Wno-format-security $(VERSION_CFLAGS) $(GRUCODE_CFLAGS)
   CFLAGS := $(OPT_FLAGS) $(INCLUDE_CFLAGS) $(BACKEND_CFLAGS) $(VERSION_CFLAGS) $(GRUCODE_CFLAGS) -fno-strict-aliasing -fwrapv
+
+ifeq ($(TOUCH_CONTROLS),1)
+  GFX_CFLAGS += -DTOUCH_CONTROLS
+endif
+
+
+ELSE ifneq ($(TARGET_ANDROID),1)
+  CC_CHECK := $(CC) -fsyntax-only -fsigned-char $(INCLUDE_CFLAGS) -Wall -Wextra -Wno-format-security -D_LANGUAGE_C $(VERSION_CFLAGS) $(MATCH_CFLAGS) $(PLATFORM_CFLAGS) $(GFX_CFLAGS) $(GRUCODE_CFLAGS)
+  CFLAGS := $(OPT_FLAGS) $(INCLUDE_CFLAGS) -D_LANGUAGE_C $(VERSION_CFLAGS) $(MATCH_CFLAGS) $(PLATFORM_CFLAGS) $(GFX_CFLAGS) $(GRUCODE_CFLAGS) -fno-strict-aliasing -fwrapv
+endif
 
 else ifeq ($(TARGET_WEB),1)
   CC_CHECK := $(CC) -fsyntax-only -fsigned-char $(BACKEND_CFLAGS) $(INCLUDE_CFLAGS) -Wall -Wextra -Wno-format-security $(VERSION_CFLAGS) $(GRUCODE_CFLAGS) -s USE_SDL=2
@@ -846,10 +881,8 @@ ZEROTERM = $(PYTHON) $(TOOLS_DIR)/zeroterm.py
 
 ifeq ($(TARGET_ANDROID),1)
 all: $(APK_SIGNED)
-EXE_DEPEND := $(APK_SIGNED)
 else
 all: $(EXE)
-EXE_DEPEND := $(EXE)
 endif
 
 # thank you apple very cool
@@ -1164,22 +1197,16 @@ $(BUILD_DIR)/%.o: %.s
 	$(AS) $(ASFLAGS) -MD $(BUILD_DIR)/$*.d -o $@ $<
 
 
-ifeq ($(TARGET_ANDROID),1)
-APK_FILES := $(shell find platform/android/ -type f)
+iifeq ($(TARGET_ANDROID),1)
+APK_FILES := $(shell find android/ -type f)
 
 $(APK): $(EXE) $(APK_FILES)
-	cp -r platform/android $(BUILD_DIR)/platform/ && \
-	cp $(PREFIX)/lib/libc++_shared.so $(BUILD_DIR)/platform/android/android/lib/$(ARCH_APK)/ && \
-	cp $(EXE) $(BUILD_DIR)/platform/android/android/lib/$(ARCH_APK)/ && \
-	cd $(BUILD_DIR)/platform/android/android && \
-	aapt package -f -M ./AndroidManifest.xml -S res -F ../../../../../$@ && \
-	aapt add -f ../../../../../$@ lib/$(ARCH_APK)/libmain.so && \
-	aapt add -f ../../../../../$@ lib/$(ARCH_APK)/libSDL2.so && \
-	aapt add -f ../../../../../$@ lib/$(ARCH_APK)/libhidapi.so && \
-	aapt add -f ../../../../../$@ lib/$(ARCH_APK)/libc++_shared.so && \
-	aapt add -f ../../../../../$@ classes.dex && \
-	cd - && \
-	rm -rf $(BUILD_DIR)/platform/android/android
+	cp -r android $(BUILD_DIR) && \
+	cp $(PREFIX)/lib/libc++_shared.so $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
+	cd $(BUILD_DIR)/android && \
+	zip -r ../../../$@ ./* && \
+	cd ../../.. && \
+	rm -rf $(BUILD_DIR)/android
 
 ifeq ($(OLD_APKSIGNER),1)
 $(APK_SIGNED): $(APK)
@@ -1187,12 +1214,16 @@ $(APK_SIGNED): $(APK)
 else
 $(APK_SIGNED): $(APK)
 	cp $< $@
-	apksigner sign --cert platform/android/certificate.pem --key platform/android/key.pk8 $@
-endif
+	apksigner sign --cert certificate.pem --key key.pk8 $@
 endif
 
+$(EXE): $(O_FILES) $(MIO0_FILES:.mio0=.o) $(SOUND_OBJ_FILES) $(ULTRA_O_FILES) $(GODDARD_O_FILES) android/lib/$(ARCH_APK)/libSDL2.so android/lib/$(ARCH_APK)/libhidapi.so
+	$(LD) -L $(BUILD_DIR) -o $@ $(O_FILES) $(SOUND_OBJ_FILES) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(LDFLAGS)
+else
 $(EXE): $(O_FILES) $(MIO0_FILES:.mio0=.o) $(SOUND_OBJ_FILES) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(BUILD_DIR)/$(RPC_LIBS) $(BUILD_DIR)/$(FONT_LIBS)
 	$(LD) -L $(BUILD_DIR) -o $@ $(O_FILES) $(SOUND_OBJ_FILES) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(LDFLAGS)
+endif
+endif
 
 .PHONY: all clean distclean default diff test load libultra res
 .PRECIOUS: $(BUILD_DIR)/bin/%.elf $(SOUND_BIN_DIR)/%.ctl $(SOUND_BIN_DIR)/%.tbl $(SOUND_SAMPLE_TABLES) $(SOUND_BIN_DIR)/%.s $(BUILD_DIR)/%
@@ -1204,3 +1235,4 @@ MAKEFLAGS += --no-builtin-rules
 -include $(DEP_FILES)
 
 print-% : ; $(info $* is a $(flavor $*) variable set to [$($*)]) @true
+endif

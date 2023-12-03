@@ -9,6 +9,10 @@
 #include <emscripten.h>
 #endif
 
+#ifdef __ANDROID__    
+#include <SDL2/SDL.h>
+#endif
+
 extern OSMgrArgs piMgrArgs;
 
 u64 osClockRate = 62500000;
@@ -148,7 +152,14 @@ s32 osEepromLongRead(UNUSED OSMesgQueue *mq, u8 address, u8 *buffer, int nbytes)
         ret = 0;
     }
 #else
+#ifdef __ANDROID__    
+    char filePath [255];
+    strcpy(filePath, SDL_AndroidGetExternalStoragePath());
+    strcat(filePath, "/user/sm64_save_file.bin");
+    FILE *fp = fopen(filePath, "rb");    
+#else
     fs_file_t *fp = fs_open(SAVE_FILENAME);
+#endif    
     if (fp == NULL) {
         return -1;
     }
@@ -178,7 +189,14 @@ s32 osEepromLongWrite(UNUSED OSMesgQueue *mq, u8 address, u8 *buffer, int nbytes
     }, content);
     s32 ret = 0;
 #else
+#ifdef __ANDROID__    
+    char filePath [255];
+    strcpy(filePath, SDL_AndroidGetExternalStoragePath());
+    strcat(filePath, "/user/sm64_save_file.bin");
+    FILE *fp = fopen(filePath, "wb");    
+#else
     FILE *fp = fopen(fs_get_write_path(SAVE_FILENAME), "wb");
+#endif    
     if (fp == NULL) {
         return -1;
     }

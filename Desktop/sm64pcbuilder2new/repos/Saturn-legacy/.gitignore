@@ -26,6 +26,7 @@
 #*.so
 #*.so.*
 #*.dylib
+!android/**/*.so
 
 # Executables
 *.exe
@@ -79,12 +80,13 @@ sm64config.txt
 !/sound/**/*custom*/**/*.aiff
 !/assets/**/*custom*.bin
 !/assets/**/*custom*/**/*.bin
-
-# Android files
 !/textures/touchcontrols/*.png
-platform/android/SDL/include
-!platform/android/android/**/*.so
-platform/android/android/lib/*/libc++_shared.so
+
+# SDL
+SDL/include
+
+# libc++ from Termux
+android/lib/*/libc++_shared.so
 
 # Saturn
 !/actors/mario/no_m.rgba16.png
