@@ -1,0 +1,11 @@
+{
+    "name": "SMG4",
+    "author": "sm64rise & SMG4 Team",
+    "version": "1.0.0",
+
+    "description": "\nSMG4's official redesigned Super Mario 64 model!\nIncludes customizable expressions, color palettes, textures, a beard toggle, and more.\n\nCreated for Saturn by sm64rise",
+
+    "eye_support": true,
+    "cc_support": true,
+    "spark_support": false
+}
