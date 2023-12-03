@@ -1197,7 +1197,7 @@ $(BUILD_DIR)/%.o: %.s
 	$(AS) $(ASFLAGS) -MD $(BUILD_DIR)/$*.d -o $@ $<
 
 
-iifeq ($(TARGET_ANDROID),1)
+ifeq ($(TARGET_ANDROID),1)
 APK_FILES := $(shell find android/ -type f)
 
 $(APK): $(EXE) $(APK_FILES)
